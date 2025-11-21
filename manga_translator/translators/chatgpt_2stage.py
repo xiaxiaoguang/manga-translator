@@ -7,7 +7,7 @@ from PIL import Image
 from manga_translator.utils import is_valuable_text
 from .chatgpt import OpenAITranslator
 from ..utils import Context
-from .keys import OPENAI_API_KEY, OPENAI_MODEL
+from .keys import XAI_API_KEY, XAI_MODEL
 
 
 def encode_image(image):
@@ -314,8 +314,8 @@ class ChatGPT2StageTranslator(OpenAITranslator):
         self.stage2_send_image = stage2_send_image     # 控制Stage2是否发送图片
         
         # 双模型配置 - 支持环境变量配置
-        self.stage1_model = stage1_model or os.getenv('OPENAI_STAGE1_MODEL') or OPENAI_MODEL
-        self.stage2_model = stage2_model or os.getenv('OPENAI_STAGE2_MODEL') or OPENAI_MODEL
+        self.stage1_model = stage1_model or os.getenv('XAI_STAGE1_MODEL') or XAI_MODEL
+        self.stage2_model = stage2_model or os.getenv('XAI_STAGE2_MODEL') or XAI_MODEL
         
         # 添加第二阶段翻译标志位和图片存储
         self._is_stage2_translation = False
@@ -911,7 +911,7 @@ class ChatGPT2StageTranslator(OpenAITranslator):
 
         # 发起请求 / Initiate the request
         # 在Stage 2时使用指定的Stage 2模型或已激活的fallback模型
-        model_to_use = OPENAI_MODEL
+        model_to_use = XAI_MODEL
         if self._is_stage2_translation:
             if self._stage2_use_fallback and hasattr(self, '_fallback_model') and self._fallback_model:
                 model_to_use = self._fallback_model
@@ -919,9 +919,9 @@ class ChatGPT2StageTranslator(OpenAITranslator):
             else:
                 model_to_use = self.stage2_model
         else:
-            # For non-stage2, use the default model from parent logic, which is typically OPENAI_MODEL
+            # For non-stage2, use the default model from parent logic, which is typically XAI_MODEL
             # This branch is needed to avoid using a potentially uninitialized model_to_use
-            model_to_use = OPENAI_MODEL
+            model_to_use = XAI_MODEL
 
         response = await self.client.chat.completions.create(
             model=model_to_use,

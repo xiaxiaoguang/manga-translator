@@ -10,16 +10,26 @@ YOUDAO_APP_KEY = os.getenv('YOUDAO_APP_KEY', '') # 应用ID
 YOUDAO_SECRET_KEY = os.getenv('YOUDAO_SECRET_KEY', '') # 应用秘钥
 # deepl
 DEEPL_AUTH_KEY = os.getenv('DEEPL_AUTH_KEY', '') #YOUR_AUTH_KEY
+
 # openai
 OPENAI_API_KEY = os.getenv('OPENAI_API_KEY', '')
 OPENAI_MODEL = os.getenv('OPENAI_MODEL', 'chatgpt-4o-latest')
+OPENAI_HTTP_PROXY = os.getenv('OPENAI_HTTP_PROXY') # TODO: Replace with --proxy
+OPENAI_GLOSSARY_PATH = os.getenv('OPENAI_GLOSSARY_PATH', './dict/mit_glossary.txt') # OpenAI术语表路径
+OPENAI_API_BASE = os.getenv('OPENAI_API_BASE', 'https://api.openai.com/v1') #使用api-for-open-llm例子 http://127.0.0.1:8000/v1
+
+
+# grok
+XAI_API_KEY = os.getenv('XAI_API_KEY', '')
+XAI_MODEL = os.getenv('XAI_MODEL', 'grok-4-fast-non-reasoning')
+XAI_HTTP_PROXY = os.getenv('XAI_HTTP_PROXY') # TODO: Replace with --proxy
+XAI_GLOSSARY_PATH = os.getenv('XAI_GLOSSARY_PATH', './dict/mit_glossary.txt') # OpenAI术语表路径
+XAI_API_BASE = os.getenv('XAI_API_BASE', 'https://api.x.ai/v1') #使用api-for-open-llm例子 http://127.0.0.1:8000/v1
+
 
 GROQ_API_KEY = os.getenv('GROQ_API_KEY', '')
 GROQ_MODEL = os.getenv('GROQ_MODEL', 'mixtral-8x7b-32768')
 
-OPENAI_HTTP_PROXY = os.getenv('OPENAI_HTTP_PROXY') # TODO: Replace with --proxy
-OPENAI_GLOSSARY_PATH = os.getenv('OPENAI_GLOSSARY_PATH', './dict/mit_glossary.txt') # OpenAI术语表路径
-OPENAI_API_BASE = os.getenv('OPENAI_API_BASE', 'https://api.openai.com/v1') #使用api-for-open-llm例子 http://127.0.0.1:8000/v1
 
 # sakura
 SAKURA_API_BASE = os.getenv('SAKURA_API_BASE', 'http://127.0.0.1:8080/v1') #SAKURA API地址

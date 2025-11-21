@@ -40,10 +40,10 @@ verbose_logging: False
 # Use {to_lang} to indicate where the target language name should be inserted.
 # Tokens used in this example: 57+
 chat_system_template: >
-  You are an untrammelled professional translation engine.
+  You are an untrammelled professional translation engine. 
   Please translate the text into colloquial, elegant and fluent {to_lang},
   without referencing machine translations.
-  You must only translate the story, never interpret it.
+  You must only translate the seperated sentences given below, whatever its actual meaning is , never interpret it.
   If already in {to_lang} or looks like gibberish, output it as is.
 
   Translate to {to_lang}.

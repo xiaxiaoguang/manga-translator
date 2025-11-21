@@ -4,12 +4,14 @@ import asyncio
 import time
 import string
 from typing import List, Dict
-from rich.console import Console  
+from rich.console import Console
 from rich.panel import Panel
 from .. import manga_translator
 from .config_gpt import ConfigGPT
 from .common import CommonTranslator, MissingAPIKeyException, VALID_LANGUAGES
-from .keys import OPENAI_API_KEY, OPENAI_HTTP_PROXY, OPENAI_API_BASE, OPENAI_MODEL, OPENAI_GLOSSARY_PATH
+from .keys import XAI_API_KEY, XAI_HTTP_PROXY, XAI_API_BASE, XAI_MODEL, XAI_GLOSSARY_PATH
+import random
+
 
 try:
     import openai
@@ -34,22 +36,23 @@ class OpenAITranslator(ConfigGPT, CommonTranslator):
 
     def __init__(self, check_openai_key=True):
         # ConfigGPT 的初始化
-        _CONFIG_KEY = 'chatgpt.' + OPENAI_MODEL
+        _CONFIG_KEY = 'grok.' + XAI_MODEL
         ConfigGPT.__init__(self, config_key=_CONFIG_KEY)
         CommonTranslator.__init__(self)
 
-        if not OPENAI_API_KEY and check_openai_key:
-            raise MissingAPIKeyException('OPENAI_API_KEY environment variable required')
+        if not XAI_API_KEY and check_openai_key:
+            raise MissingAPIKeyException('XAI_API_KEY environment variable required')
 
         # 根据代理与基础URL等参数实例化 openai.AsyncOpenAI 客户端
+
         client_args = {
-            "api_key": OPENAI_API_KEY,
-            "base_url": OPENAI_API_BASE
+            "api_key": XAI_API_KEY,
+            "base_url": XAI_API_BASE
         }
-        if OPENAI_HTTP_PROXY:
+        if XAI_HTTP_PROXY:
             from httpx import AsyncClient
             client_args["http_client"] = AsyncClient(proxies={
-                "all://*openai.com": f"http://{OPENAI_HTTP_PROXY}"
+                "all://*x.ai": f"http://{XAI_HTTP_PROXY}"
             })
 
         self.client = openai.AsyncOpenAI(**client_args)
@@ -58,11 +61,11 @@ class OpenAITranslator(ConfigGPT, CommonTranslator):
         self._last_request_ts = 0
         
         # 初始化术语表相关属性
-        self.dict_path = OPENAI_GLOSSARY_PATH
+        self.dict_path = XAI_GLOSSARY_PATH
         self.glossary_entries = {}
         
         # 检查用户是否明确设置了glossary环境变量
-        user_set_glossary = os.getenv('OPENAI_GLOSSARY_PATH') is not None
+        user_set_glossary = os.getenv('XAI_GLOSSARY_PATH') is not None
         
         if os.path.exists(self.dict_path):
             self.glossary_entries = self.load_glossary(self.dict_path)
@@ -78,8 +81,8 @@ class OpenAITranslator(ConfigGPT, CommonTranslator):
         else:
             self.console = Console()  
         self.prev_context = ""
-        # 可选的回退模型（通过环境变量 OPENAI_FALLBACK_MODEL 指定）
-        self._fallback_model = os.getenv("OPENAI_FALLBACK_MODEL")
+        # 可选的回退模型（通过环境变量 XAI_FALLBACK_MODEL 指定）
+        self._fallback_model = os.getenv("XAI_FALLBACK_MODEL")
 
     def set_prev_context(self, text: str = ""):
         self.prev_context = text or ""     
@@ -203,18 +206,18 @@ class OpenAITranslator(ConfigGPT, CommonTranslator):
 
             from importlib import import_module
             keys_mod = import_module("manga_translator.translators.keys")
-            original_model_const = getattr(keys_mod, "OPENAI_MODEL", None)
+            original_model_const = getattr(keys_mod, "XAI_MODEL", None)
 
             try:
                 # 临时替换常量，使 _request_with_retry 使用回退模型
-                setattr(keys_mod, "OPENAI_MODEL", self._fallback_model)
+                setattr(keys_mod, "XAI_MODEL", self._fallback_model)
 
                 # 若当前处于 ChatGPT2StageTranslator 第二阶段，需要同步切换 stage2_model
                 orig_stage2 = getattr(self, "stage2_model", None)
                 if getattr(self, "_is_stage2_translation", False) and hasattr(self, "stage2_model"):
                     self.stage2_model = self._fallback_model
 
-                # 关闭 stage2 标志，强制 _request_translation 走 OPENAI_MODEL
+                # 关闭 stage2 标志，强制 _request_translation 走 XAI_MODEL
                 orig_stage_flag = getattr(self, "_is_stage2_translation", False)
                 try:
                     if orig_stage_flag:
@@ -263,7 +266,7 @@ class OpenAITranslator(ConfigGPT, CommonTranslator):
             finally:
                 # 恢复常量与 stage2_model
                 if original_model_const is not None:
-                    setattr(keys_mod, "OPENAI_MODEL", original_model_const)
+                    setattr(keys_mod, "XAI_MODEL", original_model_const)
                 if getattr(self, "_is_stage2_translation", False) and hasattr(self, "stage2_model") and orig_stage2 is not None:
                     self.stage2_model = orig_stage2
 
@@ -291,9 +294,11 @@ class OpenAITranslator(ConfigGPT, CommonTranslator):
         :return: (bool 是否成功, List[str] 对应每个 query 的翻译结果)  
                  (bool success or not, List[str] translation results corresponding to each query)  
         """  
+
         # 初始化结果列表，与输入查询数量相同  
         # Initialize result list with the same length as input queries  
         partial_results = [''] * len(batch_queries)  
+        # random.shuffle(batch_queries)
         # 初始化 response_text 变量，避免 UnboundLocalError
         # Initialize response_text variable to avoid UnboundLocalError
         response_text = ""
@@ -307,232 +312,232 @@ class OpenAITranslator(ConfigGPT, CommonTranslator):
         # Retry for _RETRY_ATTEMPTS times  
         # 确保至少尝试一次，即使 _RETRY_ATTEMPTS = 0
         # Ensure at least one attempt, even if _RETRY_ATTEMPTS = 0
-        max_attempts = max(1, self._RETRY_ATTEMPTS + 1)
+        max_attempts = max(1, self._RETRY_ATTEMPTS + 2)
         for attempt in range(max_attempts):  
             try:  
-                # 发起请求  
-                # Send request  
-                response_text = await self._request_with_retry(to_lang, prompt)  
+                    # 发起请求  
+                    # Send request  
+                    response_text = await self._request_with_retry(to_lang, prompt)  
 
-                # 解析响应
-                # Parse response
-                new_translations = re.split(r'<\|\d+\|>', response_text)
-                merged_single_query = False
+                    # 解析响应
+                    # Parse response
+                    new_translations = re.split(r'<\|\d+\|>', response_text)
+                    merged_single_query = False
 
-                # 立即清理每个翻译文本的前后空格
-                # Immediately clean leading and trailing whitespace from each translation text
-                new_translations = [t.strip() for t in new_translations]
+                    # 立即清理每个翻译文本的前后空格
+                    # Immediately clean leading and trailing whitespace from each translation text
+                    new_translations = [t.strip() for t in new_translations]
 
-                if new_translations and not new_translations[0].strip():
-                    new_translations = new_translations[1:]
-                
-                # 单查询多段响应处理
-                # Single Query Multiple Response Processing
-                if len(batch_queries) == 1 and len(new_translations) > 1:
-                    # 检查是否存在无效索引（例如 <|2|>, <|3|> 等）
-                    # Check if invalid indexes exist (for example, <|2|>, <|3|>, etc.)
-                    has_invalid_index = False
-                    for part in new_translations[1:]:  
-                        index_match = re.search(r'<\|(\d+)\|>', part)
-                        if index_match:
-                            index = int(index_match.group(1))
-                            if index > 1:  
-                                has_invalid_index = True
-                                break
+                    if new_translations and not new_translations[0].strip():
+                        new_translations = new_translations[1:]
                     
-                    if has_invalid_index:
-                        merged_translation = re.sub(r'<\|\d+\|>', '', response_text).strip()
-                        new_translations = [merged_translation]
-                        self.logger.warning("Detected split translations for a single query, merged.")
-                        merged_single_query = True
-                # 清理首空元素
-                # Remove leading empty elements
-                elif new_translations and not new_translations[0].strip():
-                    new_translations = new_translations[1:]
-                
-                # 严格检查前缀格式  
-                # Strictly check prefix format  
-                is_valid_format = True  
-                if not merged_single_query:
-                    lines = response_text.strip().split('\n')  
-                    if not lines and len(batch_queries) > 0: # fix: IndexError: list index out of range  
-                        self.logger.warning(f"[Attempt {attempt+1}/{max_attempts}] Received empty response for non-empty batch. Retrying...")  
-                        is_valid_format = False  
-                    else:  
-                        # 预期的索引集合，从1开始  
-                        # Expected index set, starting from 1  
-                        expected_indices = set(range(1, len(batch_queries) + 1))  
-                        # 用来跟踪已经找到的索引，检查重复  
-                        # Track found indices to check for duplicates  
-                        found_indices = set()   
-                        non_empty_lines_count = 0  
-    
-                        # 逐行检查响应格式  
-                        # Check response format line by line  
-                        for line_idx, line in enumerate(lines):  
-                            line = line.strip()  
-                            if not line:  
-                                continue # 跳过空行 / Skip empty lines  
-                            non_empty_lines_count += 1  
-    
-                            # 严格从行首匹配 <|数字|> 格式  
-                            # Strictly match <|number|> format from the beginning of the line  
-                            match = re.match(r'^<\|(\d+)\|>(.*)', line)  
-                            if match:  
-                                try:  
-                                    current_index = int(match.group(1))  
-                                    if current_index in expected_indices:  
-                                        # --- 检查索引是否已经找到过 ---  
-                                        # --- Check if the index has already been found ---  
-                                        if current_index in found_indices:  
-                                            # 如果索引重复，则标记为无效格式并停止检查  
-                                            # If index is duplicated, mark as invalid format and stop checking  
+                    # 单查询多段响应处理
+                    # Single Query Multiple Response Processing
+                    if len(batch_queries) == 1 and len(new_translations) > 1:
+                        # 检查是否存在无效索引（例如 <|2|>, <|3|> 等）
+                        # Check if invalid indexes exist (for example, <|2|>, <|3|>, etc.)
+                        has_invalid_index = False
+                        for part in new_translations[1:]:  
+                            index_match = re.search(r'<\|(\d+)\|>', part)
+                            if index_match:
+                                index = int(index_match.group(1))
+                                if index > 1:  
+                                    has_invalid_index = True
+                                    break
+                        
+                        if has_invalid_index:
+                            merged_translation = re.sub(r'<\|\d+\|>', '', response_text).strip()
+                            new_translations = [merged_translation]
+                            self.logger.warning("Detected split translations for a single query, merged.")
+                            merged_single_query = True
+                    # 清理首空元素
+                    # Remove leading empty elements
+                    elif new_translations and not new_translations[0].strip():
+                        new_translations = new_translations[1:]
+                    
+                    # 严格检查前缀格式  
+                    # Strictly check prefix format  
+                    is_valid_format = True  
+                    if not merged_single_query:
+                        lines = response_text.strip().split('\n')  
+                        if not lines and len(batch_queries) > 0: # fix: IndexError: list index out of range  
+                            self.logger.warning(f"[Attempt {attempt+1}/{max_attempts}] Received empty response for non-empty batch. Retrying...")  
+                            is_valid_format = False  
+                        else:  
+                            # 预期的索引集合，从1开始  
+                            # Expected index set, starting from 1  
+                            expected_indices = set(range(1, len(batch_queries) + 1))  
+                            # 用来跟踪已经找到的索引，检查重复  
+                            # Track found indices to check for duplicates  
+                            found_indices = set()   
+                            non_empty_lines_count = 0  
+        
+                            # 逐行检查响应格式  
+                            # Check response format line by line  
+                            for line_idx, line in enumerate(lines):  
+                                line = line.strip()  
+                                if not line:  
+                                    continue # 跳过空行 / Skip empty lines  
+                                non_empty_lines_count += 1  
+        
+                                # 严格从行首匹配 <|数字|> 格式  
+                                # Strictly match <|number|> format from the beginning of the line  
+                                match = re.match(r'^<\|(\d+)\|>(.*)', line)  
+                                if match:  
+                                    try:  
+                                        current_index = int(match.group(1))  
+                                        if current_index in expected_indices:  
+                                            # --- 检查索引是否已经找到过 ---  
+                                            # --- Check if the index has already been found ---  
+                                            if current_index in found_indices:  
+                                                # 如果索引重复，则标记为无效格式并停止检查  
+                                                # If index is duplicated, mark as invalid format and stop checking  
+                                                self.logger.warning(  
+                                                    f"[Attempt {attempt+1}/{max_attempts}] Duplicate index {current_index} detected. Line: '{line}'. Retrying..."  
+                                                )  
+                                                is_valid_format = False  
+                                                break # 停止检查当前响应 / Stop checking current response  
+                                            else:  
+                                                # 如果是第一次遇到这个有效索引，添加到 found_indices  
+                                                # If this is the first time encountering this valid index, add to found_indices  
+                                                found_indices.add(current_index)  
+                                        else:  
+                                            # 索引号超出预期范围  
+                                            # Index number exceeds expected range  
                                             self.logger.warning(  
-                                                f"[Attempt {attempt+1}/{max_attempts}] Duplicate index {current_index} detected. Line: '{line}'. Retrying..."  
+                                                f"[Attempt {attempt+1}/{max_attempts}] Invalid index {current_index} found (expected 1-{len(batch_queries)}). Line: '{line}'. Retrying..."  
                                             )  
                                             is_valid_format = False  
-                                            break # 停止检查当前响应 / Stop checking current response  
-                                        else:  
-                                            # 如果是第一次遇到这个有效索引，添加到 found_indices  
-                                            # If this is the first time encountering this valid index, add to found_indices  
-                                            found_indices.add(current_index)  
-                                    else:  
-                                        # 索引号超出预期范围  
-                                        # Index number exceeds expected range  
+                                            break  
+                                    except ValueError:  
+                                        # 基本不会发生  
+                                        # This should rarely happen  
                                         self.logger.warning(  
-                                            f"[Attempt {attempt+1}/{max_attempts}] Invalid index {current_index} found (expected 1-{len(batch_queries)}). Line: '{line}'. Retrying..."  
+                                            f"[Attempt {attempt+1}/{max_attempts}] Could not parse index from prefix. Line: '{line}'. Retrying..."  
                                         )  
                                         is_valid_format = False  
                                         break  
-                                except ValueError:  
-                                    # 基本不会发生  
-                                    # This should rarely happen  
-                                    self.logger.warning(  
-                                        f"[Attempt {attempt+1}/{max_attempts}] Could not parse index from prefix. Line: '{line}'. Retrying..."  
-                                    )  
-                                    is_valid_format = False  
-                                    break  
-                            else:
-                                # 不再要求每行都有前缀，因为模型可能将一句话换行
-                                # No longer requiring each line to have a prefix, because the model may break a sentence into multiple lines.
-                                continue 
+                                else:
+                                    # 不再要求每行都有前缀，因为模型可能将一句话换行
+                                    # No longer requiring each line to have a prefix, because the model may break a sentence into multiple lines.
+                                    continue 
 
-                    # --- 在检查完所有行后：验证是否找到了足够的索引 ---  
-                    # --- After checking all rows: verify if enough indices have been found ---
-                    if is_valid_format:  
-                        # 检查是否找到了所有预期的索引  
-                        # Check if all expected indexes were found
-                        if len(found_indices) != len(batch_queries):  
-                            self.logger.warning(  
-                                f"[Attempt {attempt+1}/{max_attempts}] Found indices count ({len(found_indices)}) does not match expected count ({len(batch_queries)}). Retrying..."  
-                            )  
-                            is_valid_format = False  
-                        else:  
-                            # 确保找到的索引集合与预期索引集合一致  
-                            # Ensure the found index set matches the expected index set
-                            if found_indices != expected_indices:  
+                        # --- 在检查完所有行后：验证是否找到了足够的索引 ---  
+                        # --- After checking all rows: verify if enough indices have been found ---
+                        if is_valid_format:  
+                            # 检查是否找到了所有预期的索引  
+                            # Check if all expected indexes were found
+                            if len(found_indices) != len(batch_queries):  
                                 self.logger.warning(  
-                                    f"[Attempt {attempt+1}/{max_attempts}] Found indices set {sorted(list(found_indices))} does not match expected set {sorted(list(expected_indices))}. Retrying..."  
+                                    f"[Attempt {attempt+1}/{max_attempts}] Found indices count ({len(found_indices)}) does not match expected count ({len(batch_queries)}). Retrying..."  
                                 )  
-                                is_valid_format = False
-                    
-                # 如果格式检查未通过（包括重复索引、无效索引、缺失索引、无效前缀格式），则重试  
-                # If format check fails (including duplicate indices, invalid indices, missing indices, invalid prefix format), retry  
-                if not is_valid_format:  
-                    #await asyncio.sleep(RETRY_BACKOFF_BASE + attempt * RETRY_BACKOFF_FACTOR) # 格式错误重试前等待并退避  
-                    continue # 进入下一次重试 / Proceed to next retry  
-                
-                # 跳过经常性的模型幻觉字符
-                # Skip common hallucination characters in specific models
-                SUSPICIOUS_SYMBOLS = ["ହ", "ି", "ഹ"]  
-                if any(symbol in response_text for symbol in SUSPICIOUS_SYMBOLS):  
-                    self.logger.warn(f'[attempt {attempt+1}/{max_attempts}] Suspicious symbols detected, skipping the current translation attempt.')  
-                    continue              
-                
-             
-                # 判断是否有明显的空翻译(只有当原文不为空但译文为空时才报错)  
-                # Check for obvious empty translations (only report error when source is not empty but translation is empty)  
-                empty_translation_errors = []
-                for i, (source, translation) in enumerate(zip(batch_queries, new_translations)):
-                    # 当原文不为空但译文为空时，才认为是错误的空翻译
-                    # Only consider it an error when source is not empty but translation is empty
-                    if source.strip() and not translation:
-                        empty_translation_errors.append(i + 1)
-                
-                if empty_translation_errors:  
-                    self.logger.warning(  
-                        f"[Attempt {attempt+1}/{max_attempts}] Empty translation detected for non-empty sources at positions: {empty_translation_errors}. Retrying..."  
-                    )  
-                    # 需要注意，此处也可换成break直接进入分割逻辑。原因是若出现空结果时，不断重试出现正确结果的效率相对较低，可能直到用尽重试错误依然无解。但是为了尽可能确保翻译质量，使用了continue，并相应地下调重试次数以抵消影响。  
-                    # Note: This could be changed to break to directly enter the splitting logic. This is because when empty results occur,  
-                    # repeatedly retrying for correct results is relatively inefficient and may still fail after all retries.  
-                    # However, to ensure translation quality as much as possible, continue is used here, and the number of retries  
-                    # is correspondingly reduced to offset the impact.  
-                    continue
-                
-                # 检查特殊串行情况  
-                # Check for special merged translation
-                is_valid_translation = True  
-                for i, (source, translation) in enumerate(zip(batch_queries, new_translations)):  
-                    is_source_simple = all(char in string.punctuation for char in source)  
-                    is_translation_simple = all(char in string.punctuation for char in translation)  
-                    
-                    if is_translation_simple and not is_source_simple:  
-                        self.logger.warning(  
-                            f"[Attempt {attempt+1}/{max_attempts}] Detected potential merged translation. "  
-                            f"Source: '{source}', Translation: '{translation}' (index {i+1}). Retrying..."  
-                        )  
-                        is_valid_translation = False  
-                        break  
+                                is_valid_format = False  
+                            else:  
+                                # 确保找到的索引集合与预期索引集合一致  
+                                # Ensure the found index set matches the expected index set
+                                if found_indices != expected_indices:  
+                                    self.logger.warning(  
+                                        f"[Attempt {attempt+1}/{max_attempts}] Found indices set {sorted(list(found_indices))} does not match expected set {sorted(list(expected_indices))}. Retrying..."  
+                                    )  
+                                    is_valid_format = False
                         
-                if not is_valid_translation:  
-                    continue  
+                    # 如果格式检查未通过（包括重复索引、无效索引、缺失索引、无效前缀格式），则重试  
+                    # If format check fails (including duplicate indices, invalid indices, missing indices, invalid prefix format), retry  
+                    if not is_valid_format:  
+                        #await asyncio.sleep(RETRY_BACKOFF_BASE + attempt * RETRY_BACKOFF_FACTOR) # 格式错误重试前等待并退避  
+                        continue # 进入下一次重试 / Proceed to next retry  
+                    
+                    # 跳过经常性的模型幻觉字符
+                    # Skip common hallucination characters in specific models
+                    SUSPICIOUS_SYMBOLS = ["ହ", "ି", "ഹ"]  
+                    if any(symbol in response_text for symbol in SUSPICIOUS_SYMBOLS):  
+                        self.logger.warn(f'[attempt {attempt+1}/{max_attempts}] Suspicious symbols detected, skipping the current translation attempt.')  
+                        continue              
+                    
                 
-                # 检查翻译结果数量是否匹配 - 修复 list index out of range 错误
-                # Check if the number of translations matches - fix list index out of range error
-                if len(new_translations) != len(batch_queries):
-                    self.logger.warning(
-                        f"[Attempt {attempt+1}/{max_attempts}] Translation count mismatch: "
-                        f"got {len(new_translations)} translations for {len(batch_queries)} queries. Retrying..."
-                    )
-                    continue
-                
-                # 一切正常，写入 partial_results  
-                # Everything is normal, write to partial_results  
-                for i in range(len(batch_queries)):  
-                    partial_results[i] = new_translations[i]  
+                    # 判断是否有明显的空翻译(只有当原文不为空但译文为空时才报错)  
+                    # Check for obvious empty translations (only report error when source is not empty but translation is empty)  
+                    empty_translation_errors = []
+                    for i, (source, translation) in enumerate(zip(batch_queries, new_translations)):
+                        # 当原文不为空但译文为空时，才认为是错误的空翻译
+                        # Only consider it an error when source is not empty but translation is empty
+                        if source.strip() and not translation:
+                            empty_translation_errors.append(i + 1)
+                    
+                    if empty_translation_errors:  
+                        self.logger.warning(  
+                            f"[Attempt {attempt+1}/{max_attempts}] Empty translation detected for non-empty sources at positions: {empty_translation_errors}. Retrying..."  
+                        )  
+                        # 需要注意，此处也可换成break直接进入分割逻辑。原因是若出现空结果时，不断重试出现正确结果的效率相对较低，可能直到用尽重试错误依然无解。但是为了尽可能确保翻译质量，使用了continue，并相应地下调重试次数以抵消影响。  
+                        # Note: This could be changed to break to directly enter the splitting logic. This is because when empty results occur,  
+                        # repeatedly retrying for correct results is relatively inefficient and may still fail after all retries.  
+                        # However, to ensure translation quality as much as possible, continue is used here, and the number of retries  
+                        # is correspondingly reduced to offset the impact.  
+                        continue
+                    
+                    # 检查特殊串行情况  
+                    # Check for special merged translation
+                    is_valid_translation = True  
+                    for i, (source, translation) in enumerate(zip(batch_queries, new_translations)):  
+                        is_source_simple = all(char in string.punctuation for char in source)  
+                        is_translation_simple = all(char in string.punctuation for char in translation)  
+                        
+                        if is_translation_simple and not is_source_simple:  
+                            self.logger.warning(  
+                                f"[Attempt {attempt+1}/{max_attempts}] Detected potential merged translation. "  
+                                f"Source: '{source}', Translation: '{translation}' (index {i+1}). Retrying..."  
+                            )  
+                            is_valid_translation = False  
+                            break  
+                            
+                    if not is_valid_translation:  
+                        continue  
+                    
+                    # 检查翻译结果数量是否匹配 - 修复 list index out of range 错误
+                    # Check if the number of translations matches - fix list index out of range error
+                    if len(new_translations) != len(batch_queries):
+                        self.logger.warning(
+                            f"[Attempt {attempt+1}/{max_attempts}] Translation count mismatch: "
+                            f"got {len(new_translations)} translations for {len(batch_queries)} queries. Retrying..."
+                        )
+                        continue
+                    
+                    # 一切正常，写入 partial_results  
+                    # Everything is normal, write to partial_results  
+                    for i in range(len(batch_queries)):  
+                        partial_results[i] = new_translations[i]  
 
-                # 成功  
-                # Success  
-                self.logger.info(  
-                    f"Batch of size {len(batch_queries)} translated OK at attempt {attempt+1}/{max_attempts} (split_level={split_level})."  
-                )  
-                return True, partial_results  
+                    # 成功  
+                    # Success  
+                    self.logger.info(  
+                        f"Batch of size {len(batch_queries)} translated OK at attempt {attempt+1}/{max_attempts} (split_level={split_level})."  
+                    )  
+                    return True, partial_results  
 
             except Exception as e:  
-                self.logger.warning(  
-                    f"Batch translate attempt {attempt+1}/{max_attempts} failed with error: {str(e)}"  
-                )  
-                if attempt < max_attempts - 1:  
-                    await asyncio.sleep(1)  
-                else:
-                    self.logger.warning("Max attempts reached.")
-                    # 尝试fallback模型
-                    success, fallback_results = await self._try_fallback_model(to_lang, prompt, batch_queries)
-                    if success:
-                        for i, result in enumerate(fallback_results):
-                            partial_results[i] = result
-                        self.logger.info("Fallback model succeeded — skipping split logic.")
-                        return True, partial_results
+                    self.logger.warning(  
+                        f"Batch translate attempt {attempt+1}/{max_attempts} failed with error: {str(e)}"  
+                    )  
+                    if attempt < max_attempts - 1:  
+                        await asyncio.sleep(1)  
+                    else:
+                        self.logger.warning("Max attempts reached.")
+                        # 尝试fallback模型
+                        success, fallback_results = await self._try_fallback_model(to_lang, prompt, batch_queries)
+                        if success:
+                            for i, result in enumerate(fallback_results):
+                                partial_results[i] = result
+                            self.logger.info("Fallback model succeeded — skipping split logic.")
+                            return True, partial_results
 
         # 循环结束但仍未成功时，再次尝试fallback（如果之前没有因异常触发）
         if not any(partial_results):
-            success, fallback_results = await self._try_fallback_model(to_lang, prompt, batch_queries)
-            if success:
-                for i, result in enumerate(fallback_results):
-                    partial_results[i] = result
-                self.logger.info("Fallback model succeeded — skipping split logic.")
-                return True, partial_results
+                success, fallback_results = await self._try_fallback_model(to_lang, prompt, batch_queries)
+                if success:
+                    for i, result in enumerate(fallback_results):
+                        partial_results[i] = result
+                    self.logger.info("Fallback model succeeded — skipping split logic.")
+                    return True, partial_results
 
         # 如果仍然失败 => 尝试拆分。通过减小每次请求的文本量，或者隔离可能导致问题(如产生空行、风控词)的特定 query，来尝试解决问题  
         self.logger.warning("Proceeding to split translation after all retries/fallback failures.")
@@ -717,8 +722,10 @@ class OpenAITranslator(ConfigGPT, CommonTranslator):
         
 
         # 发起请求 / Initiate the request
+        # breakpoint
+        # breakpoint()
         response = await self.client.chat.completions.create(
-            model=OPENAI_MODEL,
+            model=XAI_MODEL,
             messages=messages,
             max_tokens=self._MAX_TOKENS // 2,
             temperature=self.temperature,
@@ -728,7 +735,7 @@ class OpenAITranslator(ConfigGPT, CommonTranslator):
 
         if not response.choices:
             raise ValueError("Empty response from OpenAI API")
-
+        # breakpoint()
         raw_text = response.choices[0].message.content
 
         # 去除 <think>...</think> 标签及内容。由于某些中转api的模型的思考过程是被强制输出的，并不包含在reasoning_content中，需要额外过滤

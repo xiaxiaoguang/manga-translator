@@ -28,6 +28,7 @@ async def dispatch(args: Namespace):
     if args.mode == 'local':
         if not args.input:
             raise Exception('No input image was supplied. Use -i <image_path>')
+        
         from manga_translator.mode.local import MangaTranslatorLocal
         translator = MangaTranslatorLocal(args_dict)
 
@@ -73,6 +74,7 @@ async def dispatch(args: Namespace):
         from manga_translator.mode.share import MangaShare
         translator = MangaShare(args_dict)
         await translator.listen(args_dict)
+        
     elif args.mode == 'config-help':
         import json
         config = Config.schema()
@@ -91,7 +93,6 @@ if __name__ == '__main__':
         set_main_logger(logger)
         if args.mode != 'web':
             logger.debug(args)
-
         asyncio.run(dispatch(args))
     except KeyboardInterrupt:
         print('\nTranslation cancelled by user.')
