@@ -21,7 +21,7 @@ def get_sorted_webp_files(folder_path):
     if not folder.is_dir():
         print(f"Warning: Folder not found: {folder}")
         return []
-    files = list(folder.glob("*.webp"))
+    files = list(folder.glob("*.webp")) + list(folder.glob("*.jpg"))
     return sorted(files, key=lambda p: extract_number(p.stem))
 
 def webp_multi_to_pdf(folder_list, output_pdf=None):
