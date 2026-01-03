@@ -16,18 +16,21 @@ IF NOT EXIST "E:\" (
 )
 
 :: Loop from 3 to 11 (Start, Step, End)
-FOR /L %%i IN (1,1,5) DO (
+FOR /L %%i IN (4,1,5) DO (
     echo ----------------------------------------------------------------
     echo Processing A%%i...
     echo ----------------------------------------------------------------
     
     :: Command 1: Manga Translator
     :: Using double quotes " for paths is standard on Windows to handle spaces correctly
-    python -m manga_translator local --use-gpu -v -i "G:\manga\H%%i" --config-file "E:\MangaTranslator\manga-image-translator\examples\config-example.toml"
+    python -m manga_translator local --use-gpu -v -i "G:\manga\J%%i" --config-file "E:\MangaTranslator\manga-image-translator\examples\config-example.toml" --context-size 10
     
     :: Command 2: WebP to PDF
-    python webptopdf.py "G:\manga\H%%i-translated" "G:\manga\translated\H%%i.pdf"
+    python webptopdf.py "G:\manga\J%%i-translated" "G:\manga\translated\J%%i.pdf"
+
 )
+
+@REM python webptopdf.py "G:\manga\G1-translated" "G:\manga\G2-translated" "G:\manga\G3-translated" "G:\manga\G4-translated" "G:\manga\G5-translated" "G:\manga\translated\Magazine.pdf"
 
 echo All tasks completed.
 pause

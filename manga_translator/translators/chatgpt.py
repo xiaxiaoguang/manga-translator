@@ -80,7 +80,9 @@ class OpenAITranslator(ConfigGPT, CommonTranslator):
             self.console = manga_translator._global_console
         else:
             self.console = Console()  
-        self.prev_context = ""
+            
+        self.context_history = [] 
+        self.prev_context = "" # 也可以保留这个变量作为格式化后的字符串
         # 可选的回退模型（通过环境变量 XAI_FALLBACK_MODEL 指定）
         self._fallback_model = os.getenv("XAI_FALLBACK_MODEL")
 
@@ -136,6 +138,7 @@ class OpenAITranslator(ConfigGPT, CommonTranslator):
                 current_length = 0
             batch.append(q)
             current_length += len(q) + 10
+            
         if batch:
             chunk_queries.append(batch)
 
@@ -722,12 +725,10 @@ class OpenAITranslator(ConfigGPT, CommonTranslator):
         
 
         # 发起请求 / Initiate the request
-        # breakpoint
-        # breakpoint()
         response = await self.client.chat.completions.create(
             model=XAI_MODEL,
             messages=messages,
-            max_tokens=self._MAX_TOKENS // 2,
+            max_tokens=self._MAX_TOKENS,
             temperature=self.temperature,
             top_p=self.top_p,
             timeout=self._TIMEOUT
@@ -735,7 +736,7 @@ class OpenAITranslator(ConfigGPT, CommonTranslator):
 
         if not response.choices:
             raise ValueError("Empty response from OpenAI API")
-        # breakpoint()
+
         raw_text = response.choices[0].message.content
 
         # 去除 <think>...</think> 标签及内容。由于某些中转api的模型的思考过程是被强制输出的，并不包含在reasoning_content中，需要额外过滤
@@ -776,20 +777,15 @@ class OpenAITranslator(ConfigGPT, CommonTranslator):
         # 记录 token 消耗 / Record token consumption
         if not hasattr(response, 'usage') or not hasattr(response.usage, 'total_tokens'):
             self.logger.warning("Response does not contain usage information") #第三方逆向中转api不返回token数 / The third-party reverse proxy API does not return token counts
-            self.token_count_last = 0
-            
-        # 记录 token 消耗   (rich模式) / Record token consumption (rich mode)
-        # if not hasattr(response, 'usage') or not hasattr(response.usage, 'total_tokens'):  
-            # warning_text = "WARNING: [OpenAITranslator] Response does not contain usage information"  
-            # self.print_boxed(warning_text, border_color="yellow")  
-            # self.token_count_last = 0              
+            self.token_count_last = 0       
             
         else:
             self.token_count += response.usage.total_tokens
             self.token_count_last = response.usage.total_tokens
         
+        self.prev_context += cleaned_text
         response_text = cleaned_text
-        self.print_boxed(response_text, border_color="green", title="GPT Response")          
+        self.print_boxed(response_text, border_color="green", title="GPT Response")      
         return cleaned_text
 
     def _fix_prefix_spacing(self, text_to_fix):
