@@ -10,9 +10,10 @@
 # python -m manga_translator local --use-gpu -v -i 'G:\manga\L2' --config-file 'E:\MangaTranslator\manga-image-translator\examples\config-example.toml'
 # python -m manga_translator local --use-gpu -v -i 'G:\manga\L3' --config-file 'E:\MangaTranslator\manga-image-translator\examples\config-example.toml'
 # python -m manga_translator local --use-gpu -v -i 'G:\manga\A' --config-file 'E:\MangaTranslator\manga-image-translator\examples\config-example.toml'
-python webptopdf.py  'G:\manga\translated\Sentai1'  'G:\manga\translated\Sentai2'  'G:\manga\translated\Sentai3'  'G:\manga\translated\Sentai4'  'G:\manga\translated\Sentai5'  'G:\manga\translated\Sentai6'  'G:\manga\translated\Sentai7'  'G:\manga\translated\Sentai8'  'G:\manga\translated\Sentai9'  'G:\manga\translated\Sentai10'  'G:\manga\translated\Sentai11'  'G:\manga\translated\Sentai12'  'G:\manga\translated\Sentai13'  'G:\manga\translated\SentaiWorld.pdf'
-python webptopdf.py  'G:\manga\PSV_1' 'G:\manga\PSV_2' 'G:\manga\PSV_3' 'G:\manga\PSV_4' 'G:\manga\translated\PairSentai.pdf'
-python webptopdf.py  'G:\manga\SoloSentai2_1' 'G:\manga\SoloSentai2_2' 'G:\manga\SoloSentai2_3' 'G:\manga\translated\SoloSentai2.pdf'
+# python webptopdf.py  'G:\manga\translated\Sentai1'  'G:\manga\translated\Sentai2'  'G:\manga\translated\Sentai3'  'G:\manga\translated\Sentai4'  'G:\manga\translated\Sentai5'  'G:\manga\translated\Sentai6'  'G:\manga\translated\Sentai7'  'G:\manga\translated\Sentai8'  'G:\manga\translated\Sentai9'  'G:\manga\translated\Sentai10'  'G:\manga\translated\Sentai11'  'G:\manga\translated\Sentai12'  'G:\manga\translated\Sentai13'  'G:\manga\translated\SentaiWorld.pdf'
+# python webptopdf.py  'G:\manga\PSV_1' 'G:\manga\PSV_2' 'G:\manga\PSV_3' 'G:\manga\PSV_4' 'G:\manga\translated\PairSentai.pdf'
+# python webptopdf.py  'G:\manga\SoloSentai2_1' 'G:\manga\SoloSentai2_2' 'G:\manga\SoloSentai2_3' 'G:\manga\translated\SoloSentai2.pdf'
+# python webptopdf.py  'G:\manga\F1' 'G:\manga\F2' 'G:\manga\F3' 'G:\manga\translated\Summery1.pdf'
 python webptopdf.py  'G:\manga\F1' 'G:\manga\F2' 'G:\manga\F3' 'G:\manga\translated\Summery1.pdf'
 
 # python webptopdf.py 'G:\manga\translated\A1' 'G:\manga\translated\A1.pdf'

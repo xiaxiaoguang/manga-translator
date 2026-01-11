@@ -20,7 +20,7 @@ include
 share
 .DS_Store
 dev/
-
+run.sh
 # Distribution / packaging
 .Python
 build/
@@ -43,7 +43,7 @@ MANIFEST
 .history
 /venv
 .venv/
-
+fonts/
 # Input and Output
 /input/
 /input-translated/
