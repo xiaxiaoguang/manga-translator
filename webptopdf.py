@@ -4,19 +4,18 @@ webptopdf_multi.py
 1. Accepts multiple input folders.
 2. Finds archive name from the first folder's 'sibling'.
 3. Merges all images into one PDF in HOME/translated/.
-4. Renames input folders to the archive name.
+4. COPIES and RENAMES all image files into a single consolidated folder 
+   using pure sequential numbering (0001, 0002, etc.).
+   Original folders are preserved.
 """
+
 
 import re
 import sys
 import os
+import shutil
 from pathlib import Path
 from PIL import Image
-
-def extract_number(filename):
-    """Extract first number from filename for smart sorting."""
-    match = re.search(r'\d+', filename)
-    return int(match.group()) if match else float('inf')
 
 def get_sorted_image_files(folder_path):
     folder = Path(folder_path)
@@ -28,13 +27,12 @@ def get_sorted_image_files(folder_path):
     for ext in exts:
         files.extend(folder.glob(ext))
         files.extend(folder.glob(ext.upper()))
-    return sorted(list(set(files)), key=lambda p: extract_number(p.stem))
+    return sorted(list(set(files)), key=lambda p: (p.name.lower()))
 
 def webp_multi_to_pdf(folder_list, output_pdf):
     all_images = []
-    total_pages = 0
     
-    print("Collecting images from folders...")
+    print("Collecting images from folders for PDF...")
     for idx, folder_path in enumerate(folder_list):
         files = get_sorted_image_files(folder_path)
         if not files:
@@ -56,7 +54,6 @@ def webp_multi_to_pdf(folder_list, output_pdf):
                 all_images.append(img)
             except Exception as e:
                 print(f"    Failed to load {file_path.name}: {e}")
-        total_pages += len(files)
 
     if not all_images:
         return False
@@ -73,20 +70,55 @@ def webp_multi_to_pdf(folder_list, output_pdf):
     )
     return True
 
+def merge_and_rename_files(source_folders, target_folder_name):
+    """
+    Copies files from source_folders into a single target_folder.
+    Renames them sequentially (0001, 0002, ...) based on input order.
+    Uses get_sorted_image_files to ensure the numerical sequence is correct.
+    """
+    if not source_folders:
+        return
+
+    base_dir = source_folders[0].parent
+    target_path = base_dir / target_folder_name
+    target_path.mkdir(parents=True, exist_ok=True)
+
+    print(f"\nCopying and sequentially renaming files into: {target_path.name}/")
+
+    global_counter = 1
+    
+    for folder in source_folders:
+        if not folder.exists():
+            continue
+            
+        # IMPORTANT: Use get_sorted_image_files here too to maintain the 
+        files = get_sorted_image_files(folder)
+        
+        for item in files:
+            # Create new name like 0001.jpg, 0002.webp, etc.
+            new_name = f"{global_counter:04d}{item.suffix.lower()}"
+            dest_file = target_path / new_name
+            
+            try:
+                # Use shutil.copy2 to preserve metadata and keep original files
+                shutil.copy2(str(item), str(dest_file))
+                global_counter += 1
+            except Exception as e:
+                print(f"  Error copying/renaming {item.name} to {new_name}: {e}")
+
 def main():
     if len(sys.argv) < 2:
-        print("Usage: python a.py <folder1-t> [folder2-t ...]")
+        print("Usage: python webptopdf_multi.py <folder1-t> [folder2-t ...]")
         sys.exit(1)
 
     folders = [Path(f).resolve() for f in sys.argv[1:]]
     
     # --- FIND ARCHIVE NAME ---
-    # Look at the first folder provided (e.g., manga1-t)
     first_folder = folders[0]
     home_dir = first_folder.parent
     
     # Target the sibling folder (manga1-t -> manga1)
-    sibling_name = first_folder.name.replace("-translated", "")
+    sibling_name = first_folder.name.replace("-translated", "").replace("-t", "")
     sibling_folder = home_dir / sibling_name
     
     archive_name = None
@@ -97,34 +129,22 @@ def main():
                 break
     
     if not archive_name:
-        print(f"Could not find archive in {sibling_folder}. Using fallback.")
+        print(f"Could not find archive in {sibling_folder}. Using folder name as fallback.")
         archive_name = sibling_name
 
-    # --- DEFINE OUTPUT ---
+    # --- DEFINE OUTPUT PDF ---
     pdf_output = home_dir / "translated" / f"{archive_name}.pdf"
 
-    # --- EXECUTE MERGE ---
+    # --- EXECUTE PDF MERGE ---
     success = webp_multi_to_pdf(folders, pdf_output)
 
-    # --- RENAME FOLDERS ---
+    # --- EXECUTE FILE MERGE & RENAME ---
     if success:
-        print("\nRenaming folders...")
-        for i, folder_path in enumerate(folders):
-            # If multiple folders, add suffix (abc_01, abc_02)
-            suffix = f"_{i+1:02d}" if len(folders) > 1 else ""
-            new_name = f"{archive_name}{suffix}"
-            new_path = folder_path.parent / new_name
-            
-            if folder_path.exists() and not new_path.exists():
-                try:
-                    folder_path.rename(new_path)
-                    print(f"  Renamed: {folder_path.name} -> {new_name}")
-                except Exception as e:
-                    print(f"  Error renaming {folder_path.name}: {e}")
-            else:
-                print(f"  Skip rename: {new_path.name} already exists.")
-        
-        print("\nDone! All images merged and folders renamed.")
+        merge_and_rename_files(folders, archive_name)
+        print(f"\nDone! PDF created and images copied to '{archive_name}' with sequential names.")
+        print("Original folders have been preserved.")
+    else:
+        print("\nProcess failed: No images were found or processed.")
 
 if __name__ == "__main__":
     main()

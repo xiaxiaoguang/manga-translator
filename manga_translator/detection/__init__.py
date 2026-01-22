@@ -20,6 +20,7 @@ DETECTORS = {
 detector_cache = {}
 
 def get_detector(key: Detector, *args, **kwargs) -> CommonDetector:
+    # breakpoint()
     if key not in DETECTORS:
         raise ValueError(f'Could not find detector for: "{key}". Choose from the following: %s' % ','.join(DETECTORS))
     if not detector_cache.get(key):

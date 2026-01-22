@@ -107,6 +107,10 @@ class Ocr(str, Enum):
     ocr48px_ctc = "48px_ctc"
     mocr = "mocr"
 
+class SAM(Enum):
+    none = 'none'
+    sam2_1 = 'sam2.1'
+
 class Translator(str, Enum):
     youdao = "youdao"
     baidu = "baidu"
@@ -266,7 +270,6 @@ class TranslatorConfig(BaseModel):
             self._gpt_config = OmegaConf.load(self.gpt_config)
         return self._gpt_config
 
-
 class DetectorConfig(BaseModel):
     """"""
     detector: Detector =Detector.default
@@ -315,6 +318,26 @@ class OcrConfig(BaseModel):
     """The threshold for ignoring text in non bubble areas, with valid values ranging from 1 to 50, does not ignore others. Recommendation 5 to 10. If it is too low, normal bubble areas may be ignored, and if it is too large, non bubble areas may be considered normal bubbles"""
     prob: float | None = None
     """Minimum probability of a text region to be considered valid. If None, uses the model default."""
+    
+
+class SAMPrecision(str, Enum):
+    fp32 = "fp32"
+    fp16 = "fp16"
+    bf16 = "bf16"
+
+class SAMConfig(BaseModel):
+    method: SAM = SAM.sam2_1
+    """SAM model version to use"""
+    
+    precision: SAMPrecision = SAMPrecision.fp16
+    """Inference precision. Use fp16 or bf16 for faster performance on GPUs."""
+    
+    max_side: int = 2048
+    """Maximum side length for image processing within SAM"""
+    
+    multimask_output: bool = False
+    """Whether to return multiple masks. For bubbles, False (best single mask) is usually better."""
+    
 
 class Config(BaseModel):
     # General
@@ -334,7 +357,8 @@ class Config(BaseModel):
     """inpainter configs"""
     ocr: OcrConfig = OcrConfig()
     """Ocr configs"""
-    # ?
+    sam: SAMConfig = SAMConfig()
+    
     force_simple_sort: bool = False
     """Don't use panel detection for sorting, use a simpler fallback logic instead"""
     kernel_size: int = 3

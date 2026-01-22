@@ -27,11 +27,14 @@ from .utils import (
     sort_regions,
 )
 
+from .sam import prepare_sam
 from .detection import dispatch as dispatch_detection, prepare as prepare_detection, unload as unload_detection
 from .upscaling import dispatch as dispatch_upscaling, prepare as prepare_upscaling, unload as unload_upscaling
 from .ocr import dispatch as dispatch_ocr, prepare as prepare_ocr, unload as unload_ocr
 from .textline_merge import dispatch as dispatch_textline_merge
-from .mask_refinement import dispatch as dispatch_mask_refinement
+from .mask_refinement import dispatch as dispatch_mask_refinement2
+from .sam import dispatch as dispatch_mask_refinement
+
 from .inpainting import dispatch as dispatch_inpainting, prepare as prepare_inpainting, unload as unload_inpainting
 from .translators import (
     dispatch as dispatch_translation,
@@ -48,6 +51,15 @@ logger = logging.getLogger('manga_translator')
 # 全局console实例，用于日志重定向
 _global_console = None
 _log_console = None
+host="127.0.0.1"
+port="7897"
+proxy_url = f"http://{host}:{port}"
+os.environ['ALL_PROXY'] = proxy_url
+os.environ['HTTP_PROXY'] = proxy_url
+os.environ['HTTPS_PROXY'] = proxy_url
+os.environ['HF_HUB_PROXY'] = proxy_url
+os.environ['GIT_HTTP_PROXY'] = proxy_url
+print(f"Proxy configured for Hugging Face: {proxy_url}")
 
 def set_main_logger(l):
     global logger
@@ -408,6 +420,7 @@ class MangaTranslator:
             await prepare_ocr(config.ocr.ocr, self.device)
             await prepare_inpainting(config.inpainter.inpainter, self.device)
             await prepare_translation(config.translator.translator_gen)
+            await prepare_sam(config.sam.method, self.device)
             if config.colorizer.colorizer != Colorizer.none:
                 await prepare_colorization(config.colorizer.colorizer)
 
@@ -433,6 +446,7 @@ class MangaTranslator:
         # Start the background cleanup job once if not already started.
         if self._detector_cleanup_task is None:
             self._detector_cleanup_task = asyncio.create_task(self._detector_cleanup_job())
+        
         # -- Colorization
         if config.colorizer.colorizer != Colorizer.none:
             await self._report_progress('colorizing')
@@ -463,7 +477,7 @@ class MangaTranslator:
             ctx.upscaled = ctx.img_colorized
 
         ctx.img_rgb, ctx.img_alpha = load_image(ctx.upscaled)
-
+        
         # -- Detection
         await self._report_progress('detection')
         try:
@@ -475,7 +489,8 @@ class MangaTranslator:
             ctx.textlines = [] 
             ctx.mask_raw = None
             ctx.mask = None
-
+            
+        # breakpoint()
         if self.verbose and ctx.mask_raw is not None:
             cv2.imwrite(self._result_path('mask_raw.png'), ctx.mask_raw)
 
@@ -1352,8 +1367,9 @@ class MangaTranslator:
         return new_text_regions
 
     async def _run_mask_refinement(self, config: Config, ctx: Context):
-        return await dispatch_mask_refinement(ctx.text_regions, ctx.img_rgb, ctx.mask_raw, 'fit_text',
-                                              config.mask_dilation_offset, config.ocr.ignore_bubble, self.verbose,self.kernel_size)
+        return await dispatch_mask_refinement(config.sam.method, ctx.text_regions, ctx.img_rgb, ctx.mask_raw, 'fit_text',
+                                              config.mask_dilation_offset, config.ocr.ignore_bubble, self.verbose,
+                                              self.kernel_size, self.device)
 
     async def _run_inpainting(self, config: Config, ctx: Context):
         current_time = time.time()

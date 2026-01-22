@@ -232,12 +232,13 @@ async def dispatch(
     line_spacing: int = None,
     disable_font_border: bool = False
     ) -> np.ndarray:
+    
     text_render.set_font(font_path)
     text_regions = list(filter(lambda region: region.translation, text_regions))
     # Resize regions that are too small
     # cv2.imwrite("1.png",img)
     
-    font_size_minimum = img.size//100000
+    font_size_offset = 5
     dst_points_list = resize_regions_to_font_size(img, text_regions, font_size_fixed, font_size_offset, font_size_minimum)
     for region, dst_points in tqdm(zip(text_regions, dst_points_list), '[render]', total=len(text_regions)):
         if render_mask is not None:

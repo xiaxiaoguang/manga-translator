@@ -23,14 +23,15 @@ FOR /L %%i IN (1,1,1) DO (
     
     :: Command 1: Manga Translator
     :: Using double quotes " for paths is standard on Windows to handle spaces correctly
-    python -m manga_translator local --use-gpu -v -i "G:\manga\H%%i" --font-path ".\fonts\Zcool-regular.ttf" --config-file ".\examples\config-example.toml" --context-size 10 --batch-size 2
+    python -m manga_translator local --use-gpu -v -i "G:\manga\Z%%i" --font-path ".\fonts\Zcool-regular.ttf" --config-file ".\examples\config-example.toml" --context-size 4 --batch-size 2
     
     :: Command 2: WebP to PDF
-    python webptopdf.py "G:\manga\H%%i-translated" "G:\manga\translated\H%%i.pdf"
+    python webptopdf.py "G:\manga\Z%%i-translated" "G:\manga\translated\Z%%i.pdf"
 
 )
-
+@REM python -m manga_translator local --use-gpu -v -i "G:\manga\U2" --font-path ".\fonts\Zcool-regular.ttf" --config-file ".\examples\config-example.toml" --context-size 3 --batch-size 3
 @REM python webptopdf.py "G:\manga\G1-translated" "G:\manga\G2-translated" "G:\manga\G3-translated" "G:\manga\G4-translated" "G:\manga\G5-translated" "G:\manga\translated\Magazine.pdf"
+@REM python -m manga_translator local --use-gpu -v -i "G:\manga\Z6" --font-path ".\fonts\Zcool-regular.ttf" --config-file ".\examples\config-example.toml" --context-size 3
 
 echo All tasks completed.
 pause

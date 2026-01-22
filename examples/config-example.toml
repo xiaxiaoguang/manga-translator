@@ -43,8 +43,8 @@ inpainting_size = 2048
 inpainting_precision = "bf16"
 
 [ocr]
-use_mocr_merge = false
-ocr = "48px"
+use_mocr_merge = true
+ocr = "48px_ctc"
 min_text_length = 0
 ignore_bubble = 0
 
