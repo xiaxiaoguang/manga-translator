@@ -384,7 +384,6 @@ class MangaTranslator:
                 hook('running_pre_translation_hooks', False)
             except Exception as e:
                 logger.error(f"Error in progress hook: {e}")
-
         ctx = Context()
         ctx.input = image
         ctx.result = None
