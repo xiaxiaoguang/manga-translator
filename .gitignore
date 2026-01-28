@@ -47,7 +47,7 @@ fonts/
 # Input and Output
 /input/
 /input-translated/
-
+*.bat
 # SSL Used for running server locally
 cert.pem
 key.pem
