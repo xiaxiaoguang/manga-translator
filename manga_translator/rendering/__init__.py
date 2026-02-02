@@ -45,6 +45,61 @@ def count_text_length(text: str) -> float:
             length += 1.0
     return length
 
+def get_optimal_font_size(region: 'TextBlock', min_fs: int, max_fs: int) -> int:
+    """
+    Binary search to find the largest font size that fits within the region's unrotated size.
+    """
+    low = min_fs
+    high = max_fs
+    best_size = min_fs
+    
+    # Pre-fetch dimensions to avoid re-calculating inside loop
+    box_w, box_h = region.unrotated_size
+    
+    while low <= high:
+        mid = (low + high) // 2
+        if mid <= 0: # Safety check
+            low = mid + 1
+            continue
+            
+        fits = False
+        
+        if region.horizontal:
+            # Check if total height of lines <= box height
+            lines, _ = text_render.calc_horizontal(
+                mid, 
+                region.translation, 
+                max_width=box_w, 
+                max_height=box_h, 
+                language=getattr(region, "target_lang", "en_US")
+            )
+            # Estimate total height (approximate 1.2x line spacing if not provided by renderer)
+            # If calc_horizontal respects max_height, it might truncate. 
+            # We assume it returns all lines that fit width-wise.
+            total_text_h = len(lines) * (mid * 1.05) # Using tight spacing for check
+            
+            if total_text_h <= box_h and len(lines) > 0:
+                fits = True
+                
+        else: # Vertical
+            # Check if total width of columns <= box width
+            lines, _ = text_render.calc_vertical(
+                mid, 
+                region.translation, 
+                max_height=box_h
+            )
+            total_text_w = len(lines) * (mid * 1.05)
+            if total_text_w <= box_w and len(lines) > 0:
+                fits = True
+
+        if fits:
+            best_size = mid
+            low = mid + 1 # Try larger
+        else:
+            high = mid - 1 # Too big, try smaller
+            
+    return best_size
+
 def resize_regions_to_font_size(img: np.ndarray, text_regions: List['TextBlock'], font_size_fixed: int, font_size_offset: int, font_size_minimum: int):  
     """
     Adjust text region size to accommodate font size and translated text length.
@@ -63,7 +118,6 @@ def resize_regions_to_font_size(img: np.ndarray, text_regions: List['TextBlock']
     # Define minimum font size
     if font_size_minimum == -1:  
         font_size_minimum = round((img.shape[0] + img.shape[1]) / 200)  
-    # logger.debug(f'font_size_minimum {font_size_minimum}')  
     font_size_minimum = max(1, font_size_minimum)  
 
     dst_points_list = []  
@@ -72,38 +126,47 @@ def resize_regions_to_font_size(img: np.ndarray, text_regions: List['TextBlock']
         # Store and validate original font size
         original_region_font_size = region.font_size  
         if original_region_font_size <= 0:  
-            # logger.warning(f"Invalid original font size ({original_region_font_size}) for text '{region.translation}'. Using default value {font_size_minimum}.")  
             original_region_font_size = font_size_minimum
 
-        # Determine target font size
-        current_base_font_size = original_region_font_size  
-        if font_size_fixed is not None:  
-            target_font_size = font_size_fixed  
-        else:  
-            target_font_size = current_base_font_size + font_size_offset  
+        # --- STEP 1: Determine Target Font Size ---
+        if font_size_fixed is not None:
+            # User forced a specific size
+            target_font_size = font_size_fixed
+        elif font_size_offset != 0:
+            # User forced an offset relative to detected size
+            target_font_size = original_region_font_size + font_size_offset
+        else:
+            # AUTO MODE: Binary Search for Max Size
+            # Search range: from minimum up to 1.5x the smallest box dimension (sanity cap)
+            box_min_dim = min(region.unrotated_size)
+            search_max = int(max(box_min_dim * 1.5, font_size_minimum + 10))
+            
+            target_font_size = get_optimal_font_size(region, font_size_minimum, search_max)
 
+        # Enforce minimums
         target_font_size = max(target_font_size, font_size_minimum, 1)  
-        # print("-" * 50)
-        # logger.debug(f"Calculated target font size: {target_font_size} for text '{region.translation}'")  
 
-        # Single-axis text box expansion
+        # --- STEP 2: Logic to Expand Box if Font is Too Small or Doesn't Fit ---
+        # Even if we found an "optimal" size, it might be clamped to font_size_minimum.
+        # If target_font_size (now clamped) is still too big for the box, we expand the box.
+        
         single_axis_expanded = False
         dst_points = None
         
         if region.horizontal: 
             used_rows = len(region.texts)
-            # logger.debug(f"Horizontal text - used rows: {used_rows}")
             
+            # Use TARGET font size for calculation, not the old region.font_size
             line_text_list, _ = text_render.calc_horizontal(
-                region.font_size,
+                target_font_size,
                 region.translation,
                 max_width=region.unrotated_size[0],
                 max_height=region.unrotated_size[1],
                 language=getattr(region, "target_lang", "en_US")
             )
             needed_rows = len(line_text_list)
-            # logger.debug(f"Needed rows: {needed_rows}")                
-
+            
+            # Check if expansion is needed (either by row count or if binary search hit the floor)
             if needed_rows > used_rows:
                 scale_x = ((needed_rows - used_rows) / used_rows) * 1 + 1
                 try:  
@@ -116,27 +179,21 @@ def resize_regions_to_font_size(img: np.ndarray, text_regions: List['TextBlock']
                         region.center, pts.reshape(1, -1), -region.angle,  
                         to_int=False  
                     ).reshape(-1, 4, 2)  
-                    # 移除边界限制，允许文本超出检测框边界
-                    # dst_points[..., 0] = dst_points[..., 0].clip(0, img.shape[1] - 1)  
-                    # dst_points[..., 1] = dst_points[..., 1].clip(0, img.shape[0] - 1)  
                     dst_points = dst_points.astype(np.int64)
                     single_axis_expanded = True
-                    # logger.debug(f"Successfully expanded horizontal text width: xfact={scale_x:.2f}")  
                 except Exception as e:  
-                    # logger.error(f"Failed to expand horizontal text: {e}")  
                     pass
                     
         if region.vertical:
             used_cols = len(region.texts)
-            # logger.debug(f"Vertical text - used columns: {used_cols}")
             
             line_text_list, _ = text_render.calc_vertical(
-                region.font_size, 
+                target_font_size, 
                 region.translation, 
                 max_height=region.unrotated_size[1],
             )
             needed_cols = len(line_text_list)
-            # logger.debug(f"Needed columns: {needed_cols}") 
+            
             if needed_cols > used_cols:
                 scale_x = ((needed_cols - used_cols) / used_cols) * 1 + 1
                 try:  
@@ -149,14 +206,9 @@ def resize_regions_to_font_size(img: np.ndarray, text_regions: List['TextBlock']
                         region.center, pts.reshape(1, -1), -region.angle,  
                         to_int=False  
                     ).reshape(-1, 4, 2)  
-                    # 移除边界限制，允许文本超出检测框边界
-                    # dst_points[..., 0] = dst_points[..., 0].clip(0, img.shape[1] - 1)  
-                    # dst_points[..., 1] = dst_points[..., 1].clip(0, img.shape[0] - 1)  
                     dst_points = dst_points.astype(np.int64)
                     single_axis_expanded = True
-                    # logger.debug(f"Successfully expanded vertical text width: xfact={scale_x:.2f}")  
                 except Exception as e:  
-                    # logger.error(f"Failed to expand vertical text: {e}")  
                     pass
 
         # If single-axis expansion failed, use general scaling
@@ -171,41 +223,28 @@ def resize_regions_to_font_size(img: np.ndarray, text_regions: List['TextBlock']
                 increase_percentage = (char_count_trans - char_count_orig) / char_count_orig
                 font_increase_ratio = 1 + (increase_percentage * 0.3)
                 font_increase_ratio = min(1.5, max(1.0, font_increase_ratio))
-                # logger.debug(f"Translation is {increase_percentage:.2%} longer, font increase ratio: {font_increase_ratio:.2f}")
-                target_font_size = int(target_font_size * font_increase_ratio)
-                # logger.debug(f"Adjusted target font size: {target_font_size}")
-                # Need greater bounding box scaling to accommodate larger font size and longer text
-                target_scale = max(1, min(1 + increase_percentage * 0.3, 2))  # Possibly max(1, min(1 + (font_increase_ratio-1), 2))
-                # logger.debug(f"Translation is longer than original and font increased, need larger bounding box scaling. Target scale factor: {target_scale:.2f}")
-            # Short text box expansion is quite aggressive, in many cases short text boxes don't need expansion
-            # elif char_count_orig > 0 and char_count_trans < char_count_orig:
-            #     # Translation is shorter, increase font proportionally
-            #     decrease_percentage = (char_count_orig - char_count_trans) / char_count_orig
-            #     # Font increase ratio equals text reduction ratio
-            #     font_increase_ratio = 1 + decrease_percentage
-            #     # Limit font increase ratio to reasonable range, e.g., between 1.0 and 1.5
-            #     font_increase_ratio = min(1.5, max(1.0, font_increase_ratio))
-            #     logger.debug(f"Translation is {decrease_percentage:.2%} shorter than original, font increase ratio: {font_increase_ratio:.2f}")
-            #     # Update target font size
-            #     target_font_size = int(target_font_size * font_increase_ratio)
-            #     logger.debug(f"Adjusted target font size: {target_font_size}")
-            #     target_scale = 1.0  # No additional bounding box scaling needed
-            #     logger.debug(f"Translation is shorter than original, no bounding box scaling applied, only font increase. Target scale factor: {target_scale:.2f}")            
+                
+                # We already calculated target_font_size via binary search (max possible).
+                # If we are here, it means we are expanding strictly due to length ratio.
+                # However, usually binary search handles "fitting", so this is a fallback for density.
+                
+                # If we used binary search, target_font_size is already maximized for the box.
+                # Increasing it further requires box expansion.
+                if font_size_fixed is None:
+                     target_font_size = int(target_font_size * font_increase_ratio)
+
+                target_scale = max(1, min(1 + increase_percentage * 0.3, 2))  
             else:  
                 target_scale = 1              
-                # logger.debug(f"No length ratio scaling applied. Target scale factor: {target_scale:.2f}")   
 
             # Calculate final scaling factor
+            # Ensure we don't scale down if we already set a target size
             font_size_scale = (((target_font_size - original_region_font_size) / original_region_font_size) * 0.4 + 1) if original_region_font_size > 0 else 1.0  
-            # logger.debug(f"Font size ratio: ({target_font_size} / {original_region_font_size})")  
             final_scale = max(font_size_scale, target_scale)
             final_scale = max(1, min(final_scale, 1.1))  
-            
-            # logger.debug(f"Final scaling factor: {final_scale:.2f}")  
 
             # Scale bounding box if needed
             if final_scale > 1.001:  
-                # logger.debug(f"Scaling bounding box: text='{region.translation}', scale={final_scale:.2f}")  
                 try:  
                     poly = Polygon(region.unrotated_min_rect[0])  
                      # Scale from the center  
@@ -213,15 +252,10 @@ def resize_regions_to_font_size(img: np.ndarray, text_regions: List['TextBlock']
                     scaled_unrotated_points = np.array(poly.exterior.coords[:4])  
 
                     dst_points = rotate_polygons(region.center, scaled_unrotated_points.reshape(1, -1), -region.angle, to_int=False).reshape(-1, 4, 2)  
-                    # 移除边界限制，允许文本超出检测框边界
-                    # dst_points[..., 0] = dst_points[..., 0].clip(0, img.shape[1] - 1)  
-                    # dst_points[..., 1] = dst_points[..., 1].clip(0, img.shape[0] - 1)  
                     dst_points = dst_points.astype(np.int64)  
                     dst_points = dst_points.reshape((-1, 4, 2))  
-                    # logger.debug(f"Finished calculating scaled dst_points.")  
 
                 except Exception as e:  
-                    # logger.error(f"Error during scaling for text '{region.translation}': {e}. Using original min_rect.")  
                     dst_points = region.min_rect
             else:
                 dst_points = region.min_rect
@@ -247,12 +281,8 @@ async def dispatch(
 
     text_render.set_font(font_path)
     text_regions = list(filter(lambda region: region.translation, text_regions))
-
     # Resize regions that are too small
     dst_points_list = resize_regions_to_font_size(img, text_regions, font_size_fixed, font_size_offset, font_size_minimum)
-
-    # TODO: Maybe remove intersections
-
     # Render text
     for region, dst_points in tqdm(zip(text_regions, dst_points_list), '[render]', total=len(text_regions)):
         if render_mask is not None:
@@ -292,8 +322,6 @@ def render(
     else:
         render_horizontally = region.horizontal
 
-    #print(f"Region text: {region.text}, forced_direction: {forced_direction}, render_horizontally: {render_horizontally}")
-
     if render_horizontally:
         temp_box = text_render.put_text_horizontal(
             region.font_size,
@@ -323,83 +351,43 @@ def render(
 
     # Extend temporary box so that it has same ratio as original
     box = None  
-    #print("\n" + "="*50)  
-    #print(f"Processing text: \"{region.get_translation_for_rendering()}\"")  
-    #print(f"Text direction: {'Horizontal' if region.horizontal else 'Vertical'}")  
-    #print(f"Font size: {region.font_size}, Alignment: {region.alignment}")  
-    #print(f"Target language: {region.target_lang}")      
-    #print(f"Region horizontal: {region.horizontal}")  
-    #print(f"Starting image adjustment: r_temp={r_temp}, r_orig={r_orig}, h={h}, w={w}")  
+    
     if region.horizontal:  
-        #print("Processing HORIZONTAL region")  
-        
         if r_temp > r_orig:   
-            #print(f"Case: r_temp({r_temp}) > r_orig({r_orig}) - Need vertical padding")  
             h_ext = int((w / r_orig - h) // 2) if r_orig > 0 else 0  
-            #print(f"Calculated h_ext = {h_ext}")  
             
             if h_ext >= 0:  
-                #print(f"Creating new box with dimensions: {h + h_ext * 2}x{w}")  
                 box = np.zeros((h + h_ext * 2, w, 4), dtype=np.uint8)  
-                #print(f"Placing temp_box at position [h_ext:h_ext+h, :w] = [{h_ext}:{h_ext+h}, 0:{w}]")  
-                # Columns fully filled, rows centered
                 box[h_ext:h_ext+h, 0:w] = temp_box  
             else:  
-                #print("h_ext < 0, using original temp_box")  
                 box = temp_box.copy()  
         else:   
-            #print(f"Case: r_temp({r_temp}) <= r_orig({r_orig}) - Need horizontal padding")  
             w_ext = int((h * r_orig - w) // 2)  
-            #print(f"Calculated w_ext = {w_ext}")  
             
             if w_ext >= 0:  
-                #print(f"Creating new box with dimensions: {h}x{w + w_ext * 2}")  
                 box = np.zeros((h, w + w_ext * 2, 4), dtype=np.uint8)  
-                #print(f"Placing temp_box at position [:, :w] = [0:{h}, 0:{w}]")  
-         
-                # The line is full, and there should be no empty columns on the left side of the text. Otherwise, when multiple text boxes are aligned on the left, the translated text cannot be aligned. Common scenarios: borderless comics, comic postscript.  
-                # When there are bubbles on the current page, it can be changed to center: box[0:h, w_ext:w_ext+w] = temp_box, requiring more accurate bubble detection. But not changing it doesn't have much impact.
                 box[0:h, 0:w] = temp_box  
             else:  
-                #print("w_ext < 0, using original temp_box")  
                 box = temp_box.copy()  
     else:  
-        #print("Processing VERTICAL region")  
-        
         if r_temp > r_orig:   
-            #print(f"Case: r_temp({r_temp}) > r_orig({r_orig}) - Need vertical padding")  
             h_ext = int(w / (2 * r_orig) - h / 2) if r_orig > 0 else 0   
-            #print(f"Calculated h_ext = {h_ext}")  
             
             if h_ext >= 0:   
-                #print(f"Creating new box with dimensions: {h + h_ext * 2}x{w}")  
                 box = np.zeros((h + h_ext * 2, w, 4), dtype=np.uint8)  
-                #print(f"Placing temp_box at position [0:h, 0:w] = [0:{h}, 0:{w}]")  
-                # The rows are full, and there should be no empty lines above the text; otherwise, when multiple text boxes have their top edges aligned, the text cannot be aligned. Common scenario: borderless comics, CG. 
-                # When there are bubbles on the current page, it can be changed to center: box[h_ext:h_ext+h, 0:w] = temp_box, requiring more accurate bubble detection.
                 box[0:h, 0:w] = temp_box  
             else:   
-                #print("h_ext < 0, using original temp_box")  
                 box = temp_box.copy()   
         else:   
-            #print(f"Case: r_temp({r_temp}) <= r_orig({r_orig}) - Need horizontal padding")  
             w_ext = int((h * r_orig - w) / 2)  
-            #print(f"Calculated w_ext = {w_ext}")  
             
             if w_ext >= 0:  
-                #print(f"Creating new box with dimensions: {h}x{w + w_ext * 2}")  
                 box = np.zeros((h, w + w_ext * 2, 4), dtype=np.uint8)  
-                #print(f"Placing temp_box at position [0:h, w_ext:w_ext+w] = [0:{h}, {w_ext}:{w_ext+w}]") 
-                # Rows are fully filled, columns are centered
                 box[0:h, w_ext:w_ext+w] = temp_box  
             else:   
-                #print("w_ext < 0, using original temp_box")  
                 box = temp_box.copy()   
-    #print(f"Final box dimensions: {box.shape if box is not None else 'None'}")  
 
     src_points = np.array([[0, 0], [box.shape[1], 0], [box.shape[1], box.shape[0]], [0, box.shape[0]]]).astype(np.float32)
-    #src_pts[:, 0] = np.clip(np.round(src_pts[:, 0]), 0, enlarged_w * 2)
-    #src_pts[:, 1] = np.clip(np.round(src_pts[:, 1]), 0, enlarged_h * 2)
 
     M, _ = cv2.findHomography(src_points, dst_points, cv2.RANSAC, 5.0)
     rgba_region = cv2.warpPerspective(box, M, (img.shape[1], img.shape[0]), flags=cv2.INTER_LINEAR, borderMode=cv2.BORDER_CONSTANT, borderValue=0)

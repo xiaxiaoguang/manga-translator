@@ -28,7 +28,6 @@ def get_sam_model(key: SAM, *args, **kwargs) -> CommonSAM:
 async def prepare_sam(sam_key: SAM, device: str = "cpu"):
     model = get_sam_model(sam_key)
     await model.load(device)
-
 async def dispatch(
     sam_key: SAM,
     text_regions: List[TextBlock],
@@ -43,12 +42,8 @@ async def dispatch(
     config: Optional[SAMConfig] = None,
 ) -> np.ndarray:
 
-    # os.makedirs("debug_output", exist_ok=True)
-    # cv2.imwrite("debug_output/01_raw_mask_input.png", raw_mask)
-    # cv2.imwrite("debug_output/01_raw_image.png", raw_image)
-
     model = get_sam_model(sam_key)
-    if isinstance(model, SAM2Inpainter): # Ensure correct class check
+    if isinstance(model, SAM2Inpainter):
         await model.load(device)
     config = config or SAMConfig()
 
@@ -64,7 +59,6 @@ async def dispatch(
             q = Quadrilateral(l * scale_factor, "", 0)
             textlines.append(q)
 
-    # This creates the 'initial' text-only mask
     refined_text_mask = (
         complete_mask(img_resized, mask_resized, textlines, dilation_offset=dilation_offset, kernel_size=kernel_size)
         if method == "fit_text"
@@ -76,14 +70,18 @@ async def dispatch(
     else:
         refined_text_mask = cv2.resize(refined_text_mask, (raw_image.shape[1], raw_image.shape[0]))
         refined_text_mask[refined_text_mask > 0] = 255
-    canvas_prompts = raw_image.copy()
-    canvas_results = raw_image.copy()
+
+    # --- Step 2: SAM Refinement ---
     mask_overlay = np.zeros_like(raw_image)
-    # --- Step 2: SAM Refinement (Ratio-based Expansion) ---
+    bubble_combined_mask = np.zeros_like(refined_text_mask) # Initialize here to avoid scope issues
+
     if sam_key != SAM.none and text_regions:
         img_h, img_w = raw_image.shape[:2]
-        # Ratio of expansion (0.5 means add 50% of width/height to each side)
-        expand_ratio = 0
+        
+        # PROMPT CONFIGURATION
+        # Only use a small expansion for the prompt itself to give SAM context,
+        # but don't go too wide to avoid grabbing neighbors.
+        expand_ratio = 0.05 
         prompt_boxes = []
 
         for region in text_regions:
@@ -91,58 +89,74 @@ async def dispatch(
             w = x2 - x1
             h = y2 - y1
 
-            # Calculate expansion amounts
+            # Symmetrical expansion
             dw = w * expand_ratio
-            tmp = dw
             dh = h * expand_ratio
-            dw = dh
-            dh = tmp
             
-            # Apply expansion while staying within image boundaries
             px1 = max(0, x1 - dw)
             py1 = max(0, y1 - dh)
             px2 = min(img_w, x2 + dw)
             py2 = min(img_h, y2 + dh)
             
             prompt_boxes.append([float(px1), float(py1), float(px2), float(py2)])            
-            # Draw the padded box on the prompt canvas (Red)
-            cv2.rectangle(canvas_prompts, (int(px1), int(py1)), (int(px2), int(py2)), (0, 0, 255), 2)
 
         # Run Prediction
         sam_masks = await model.predict(raw_image, prompt_boxes, config, verbose)
-        bubble_combined_mask = np.zeros_like(refined_text_mask)
 
         for i, m in enumerate(sam_masks):
             region = text_regions[i]
+            x1, y1, x2, y2 = region.xyxy
+            box_area = (x2 - x1) * (y2 - y1)
             
-            # Logic check: OSB vs Bubble
+            # Logic check: OSB (Out of Speech Bubble) vs Bubble
+            # Expanded OSB logic: if it's very small text or dark background, treat as OSB
             is_light_bg = np.mean(region.bg_colors) > 200
-            is_likely_osb = not is_light_bg or abs(region.angle) > 5.0
+            is_small_text = box_area < (img_h * img_w * 0.001) # Very tiny text often floats
+            is_likely_osb = not is_light_bg or abs(region.angle) > 5.0 or is_small_text
             region.is_osb = is_likely_osb
 
+            # --- SAFETY CLAMP LOGIC START ---
+            # Even if it looks like a bubble, SAM might fail and grab the background.
+            # We calculate the mask area vs the text box area.
+            mask_area = np.count_nonzero(m)
+            
+            # Threshold: If mask is > 3.5x the text box, it's likely a leak.
+            # (Standard bubbles are usually 1.5x - 2.5x the text area)
+            leakage_threshold = 3.5 
+            
+            if mask_area > (box_area * leakage_threshold):
+                # Calculate a "Safe Zone" rect (e.g., 50% expansion of text box)
+                pad_x = int((x2 - x1) * 0.6)
+                pad_y = int((y2 - y1) * 0.6)
+                
+                safe_x1 = max(0, int(x1 - pad_x))
+                safe_y1 = max(0, int(y1 - pad_y))
+                safe_x2 = min(img_w, int(x2 + pad_x))
+                safe_y2 = min(img_h, int(y2 + pad_y))
+                
+                # Create constraint mask
+                safe_mask = np.zeros_like(m)
+                cv2.rectangle(safe_mask, (safe_x1, safe_y1), (safe_x2, safe_y2), 255, -1)
+                
+                # Intersect SAM result with Safe Zone
+                m = cv2.bitwise_and(m, safe_mask)
+            # --- SAFETY CLAMP LOGIC END ---
+
             if is_likely_osb:
+                # For OSB, we ignore SAM mostly and use a tight hull around text
                 osb_mask = np.zeros_like(refined_text_mask)
                 cv2.fillPoly(osb_mask, [region.min_rect.astype(np.int32)], 255)
+                # Dilate slightly to cover antialiasing
                 m = cv2.dilate(osb_mask, np.ones((kernel_size, kernel_size), np.uint8), iterations=1)
             
             region.bubble_mask = m
             bubble_combined_mask = cv2.bitwise_or(bubble_combined_mask, m)
             
-            # Add to global green overlay
+            # Add to global green overlay for debug
             mask_overlay[m > 0] = [0, 255, 0]
 
-        # Blend the green masks onto the results canvas
-        canvas_results = cv2.addWeighted(canvas_results, 0.7, mask_overlay, 0.3, 0)
-
-        # Create the side-by-side full image visualization
-        # Resize for easier viewing if the manga page is massive (optional)
-        global_comparison = np.hstack([canvas_prompts, canvas_results])
-        
-        # Save the full page debug image
-        # cv2.imwrite("debug_output/00_GLOBAL_SAM_REFINE.jpg", global_comparison)
-
-        # Merge results
-        final_mask = cv2.bitwise_or(refined_text_mask, bubble_combined_mask)
+    # Merge results
+    final_mask = cv2.bitwise_or(refined_text_mask, bubble_combined_mask)
         
     # --- Step 3: Cleanup / Ignore logic ---
     if 1 <= ignore_bubble <= 50:
@@ -154,5 +168,4 @@ async def dispatch(
             if is_ignore(cv2.bitwise_and(raw_image, raw_image, mask=temp_mask), ignore_bubble):
                 cv2.drawContours(final_mask, [cnt], -1, 0, -1)
 
-    # cv2.imwrite("debug_output/02_final_refined_mask.png", final_mask)
     return final_mask

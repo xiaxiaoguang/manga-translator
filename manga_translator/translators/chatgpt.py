@@ -455,7 +455,7 @@ class OpenAITranslator(ConfigGPT, CommonTranslator):
                     SUSPICIOUS_SYMBOLS = ["ହ", "ି", "ഹ"]  
                     if any(symbol in response_text for symbol in SUSPICIOUS_SYMBOLS):  
                         self.logger.warn(f'[attempt {attempt+1}/{max_attempts}] Suspicious symbols detected, skipping the current translation attempt.')  
-                        continue              
+                        continue
                     
                 
                     # 判断是否有明显的空翻译(只有当原文不为空但译文为空时才报错)  
@@ -465,18 +465,19 @@ class OpenAITranslator(ConfigGPT, CommonTranslator):
                         # 当原文不为空但译文为空时，才认为是错误的空翻译
                         # Only consider it an error when source is not empty but translation is empty
                         if source.strip() and not translation:
+                            # translation = '.'
                             empty_translation_errors.append(i + 1)
                     
                     if empty_translation_errors:  
                         self.logger.warning(  
                             f"[Attempt {attempt+1}/{max_attempts}] Empty translation detected for non-empty sources at positions: {empty_translation_errors}. Retrying..."  
-                        )  
+                        ) 
+                        continue
                         # 需要注意，此处也可换成break直接进入分割逻辑。原因是若出现空结果时，不断重试出现正确结果的效率相对较低，可能直到用尽重试错误依然无解。但是为了尽可能确保翻译质量，使用了continue，并相应地下调重试次数以抵消影响。  
                         # Note: This could be changed to break to directly enter the splitting logic. This is because when empty results occur,  
                         # repeatedly retrying for correct results is relatively inefficient and may still fail after all retries.  
                         # However, to ensure translation quality as much as possible, continue is used here, and the number of retries  
                         # is correspondingly reduced to offset the impact.  
-                        continue
                     
                     # 检查特殊串行情况  
                     # Check for special merged translation
