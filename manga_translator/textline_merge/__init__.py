@@ -188,7 +188,7 @@ async def dispatch(textlines: List[Quadrilateral], width: int, height: int, verb
     #     s = str(l.pts)
     #     s = re.sub(r'([\d\]]) ', r'\1, ', s.replace('\n ', ', ')).replace(']]', ']],')
     #     print(s)
-
+    # breakpoint()
     text_regions: List[TextBlock] = []
     for (txtlns, fg_color, bg_color) in merge_bboxes_text_region(textlines, width, height):
         total_logprobs = 0
@@ -198,10 +198,12 @@ async def dispatch(textlines: List[Quadrilateral], width: int, height: int, verb
 
         font_size = int(min([txtln.font_size for txtln in txtlns]))
         angle = np.rad2deg(np.mean([txtln.angle for txtln in txtlns])) - 90
+        
         if abs(angle) < 3:
             angle = 0
         lines = [txtln.pts for txtln in txtlns]
         texts = [txtln.text for txtln in txtlns]
+        
         region = TextBlock(lines, texts, font_size=font_size, angle=angle, prob=np.exp(total_logprobs),
                            fg_color=fg_color, bg_color=bg_color)
         text_regions.append(region)

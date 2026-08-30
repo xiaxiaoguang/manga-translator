@@ -79,7 +79,7 @@ class OpenAITranslator(ConfigGPT, CommonTranslator):
         if hasattr(manga_translator, '_global_console') and manga_translator._global_console:
             self.console = manga_translator._global_console
         else:
-            self.console = Console()  
+            self.console = Console()
             
         self.context_history = [] 
         self.prev_context = "" # 也可以保留这个变量作为格式化后的字符串

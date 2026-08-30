@@ -489,7 +489,6 @@ class MangaTranslator:
             ctx.mask_raw = None
             ctx.mask = None
             
-        # breakpoint()
         if self.verbose and ctx.mask_raw is not None:
             cv2.imwrite(self._result_path('mask_raw.png'), ctx.mask_raw)
 
@@ -530,6 +529,91 @@ class MangaTranslator:
             if not self.ignore_errors:  
                 raise 
             ctx.text_regions = [] # Fallback to empty text_regions if textline merge fails
+
+        # ---------------------------------------------------------
+        # NON-UNIFORM EXPANSION CONFIGURATION
+        # ---------------------------------------------------------
+        # Thickness: The stacking direction (Height for Horiz, Width for Vert)
+        EXPAND_THICKNESS = 1.5  # 50% thicker lines + 50% more spacing
+        # Length: The reading direction (Width for Horiz, Height for Vert)
+        EXPAND_LENGTH    = 1.05 # 5% longer lines
+        # ---------------------------------------------------------
+
+        for region in ctx.text_regions:
+            if region.lines is None or len(region.lines) == 0:
+                continue
+            
+            # --- PREPARATION ---
+            # Shape: (N_lines, 4_points, 2_coords)
+            current_lines = region.lines.astype(np.float32)
+            
+            # 1. Identify Centers
+            # Local center of each line (N, 1, 2)
+            line_centers = np.mean(current_lines, axis=1, keepdims=True)
+            # Global center of the whole block (1, 1, 2) - Pivot point for spreading
+            block_center = np.mean(line_centers, axis=0, keepdims=True)
+
+            # 2. Prepare Rotation Matrices (Un-rotate -> Scale -> Rotate back)
+            angle_rad = -np.deg2rad(region.angle)
+            cos_a, sin_a = np.cos(angle_rad), np.sin(angle_rad)
+            
+            # Helper function for rotation
+            def rotate_vecs(v, c, s):
+                vx, vy = v[..., 0], v[..., 1]
+                rx = vx * c - vy * s
+                ry = vx * s + vy * c
+                return np.stack([rx, ry], axis=-1)
+
+            # 3. Determine Scaling Factors (Anisotropic)
+            is_vertical = region.direction.startswith('v')
+            if is_vertical:
+                # Vertical Text: Stacked horizontally (X is thickness)
+                scale_x = EXPAND_THICKNESS
+                scale_y = EXPAND_LENGTH
+            else:
+                # Horizontal Text: Stacked vertically (Y is thickness)
+                scale_x = EXPAND_LENGTH
+                scale_y = EXPAND_THICKNESS
+            
+            scale_vec = np.array([scale_x, scale_y], dtype=np.float32)
+
+            # --- STEP A: SPREAD LINES APART (Global Scaling) ---
+            # Vector from BlockCenter -> LineCenter
+            # If we don't do this, thicker lines will overlap each other.
+            global_offsets = line_centers - block_center
+            
+            # Align to axis -> Scale -> Restore
+            aligned_offsets = rotate_vecs(global_offsets, cos_a, sin_a)
+            scaled_offsets = aligned_offsets * scale_vec
+            restored_offsets = rotate_vecs(scaled_offsets, cos_a, -sin_a) # Inverse rot
+            
+            # Calculate new positions for the center of each line
+            new_line_centers = block_center + restored_offsets
+
+            # --- STEP B: RESIZE LINE BOXES (Local Scaling) ---
+            # Vector from LineCenter -> Corners
+            local_vectors = current_lines - line_centers
+            
+            # Align to axis -> Scale -> Restore
+            aligned_locals = rotate_vecs(local_vectors, cos_a, sin_a)
+            scaled_locals = aligned_locals * scale_vec
+            restored_locals = rotate_vecs(scaled_locals, cos_a, -sin_a)
+
+            # --- COMBINE ---
+            # New Position + New Size
+            new_lines = new_line_centers + restored_locals
+
+            # 4. Save and Clear Cache
+            region.lines = new_lines.astype(np.int32)
+            
+            cached_vars = [
+                'xyxy', 'xywh', 'center', 'unrotated_polygons', 
+                'unrotated_min_rect', 'min_rect', 'polygon_aspect_ratio', 
+                'unrotated_size', 'aspect_ratio'
+            ]
+            for var in cached_vars:
+                if var in region.__dict__:
+                    del region.__dict__[var]
 
         if self.verbose and ctx.text_regions:
             show_panels = not config.force_simple_sort  # 当不使用简单排序时显示panel

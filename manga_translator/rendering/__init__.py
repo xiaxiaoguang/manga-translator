@@ -117,7 +117,7 @@ def resize_regions_to_font_size(img: np.ndarray, text_regions: List['TextBlock']
     
     # Define minimum font size
     if font_size_minimum == -1:  
-        font_size_minimum = round((img.shape[0] + img.shape[1]) / 200)  
+        font_size_minimum = round((img.shape[0] + img.shape[1]) / 400)  
     font_size_minimum = max(1, font_size_minimum)  
 
     dst_points_list = []  
@@ -141,7 +141,7 @@ def resize_regions_to_font_size(img: np.ndarray, text_regions: List['TextBlock']
             box_min_dim = min(region.unrotated_size)
             search_max = int(max(box_min_dim * 1.5, font_size_minimum + 10))
             
-            target_font_size = get_optimal_font_size(region, font_size_minimum, search_max)
+            target_font_size = get_optimal_font_size(region, font_size_minimum, search_max) + 10
 
         # Enforce minimums
         target_font_size = max(target_font_size, font_size_minimum, 1)  
@@ -221,7 +221,7 @@ def resize_regions_to_font_size(img: np.ndarray, text_regions: List['TextBlock']
 
             if char_count_orig > 0 and char_count_trans > char_count_orig:  
                 increase_percentage = (char_count_trans - char_count_orig) / char_count_orig
-                font_increase_ratio = 1 + (increase_percentage * 0.3)
+                font_increase_ratio = 1 + (increase_percentage * 0.2)
                 font_increase_ratio = min(1.5, max(1.0, font_increase_ratio))
                 
                 # We already calculated target_font_size via binary search (max possible).
@@ -233,7 +233,7 @@ def resize_regions_to_font_size(img: np.ndarray, text_regions: List['TextBlock']
                 if font_size_fixed is None:
                      target_font_size = int(target_font_size * font_increase_ratio)
 
-                target_scale = max(1, min(1 + increase_percentage * 0.3, 2))  
+                target_scale = max(1, min(1 + increase_percentage * 0.2, 2))  
             else:  
                 target_scale = 1              
 
@@ -278,17 +278,27 @@ async def dispatch(
     line_spacing: int = None,
     disable_font_border: bool = False
     ) -> np.ndarray:
-
+    
     text_render.set_font(font_path)
     text_regions = list(filter(lambda region: region.translation, text_regions))
+
     # Resize regions that are too small
     dst_points_list = resize_regions_to_font_size(img, text_regions, font_size_fixed, font_size_offset, font_size_minimum)
+    
     # Render text
     for region, dst_points in tqdm(zip(text_regions, dst_points_list), '[render]', total=len(text_regions)):
         if render_mask is not None:
-            # set render_mask to 1 for the region that is inside dst_points
             cv2.fillConvexPoly(render_mask, dst_points.astype(np.int32), 1)
+        
         img = render(img, region, dst_points, hyphenate, line_spacing, disable_font_border)
+
+        # # --- VISUALIZATION (RED BOXES) ---
+        # if region.lines is not None:
+        #      for line in region.lines:
+        #         pts = line.reshape((-1, 1, 2)).astype(np.int32)
+        #         cv2.polylines(img, [pts], isClosed=True, color=(0, 0, 255), thickness=2)
+        # # ---------------------------------
+
     return img
 
 def render(
@@ -302,7 +312,7 @@ def render(
     fg, bg = region.get_font_colors()
     fg, bg = fg_bg_compare(fg, bg)
 
-    if disable_font_border :
+    if disable_font_border:
         bg = None
 
     middle_pts = (dst_points[:, [1, 2, 3, 0]] + dst_points) / 2
@@ -310,7 +320,6 @@ def render(
     norm_v = np.linalg.norm(middle_pts[:, 2] - middle_pts[:, 0], axis=1)
     r_orig = np.mean(norm_h / norm_v)
 
-    # If configuration is set to non-automatic mode, use configuration to determine direction directly
     forced_direction = region._direction if hasattr(region, "_direction") else region.direction
     if forced_direction != "auto":
         if forced_direction in ["horizontal", "h"]:
@@ -322,40 +331,30 @@ def render(
     else:
         render_horizontally = region.horizontal
 
+    # Safely generate the text canvas block
     if render_horizontally:
         temp_box = text_render.put_text_horizontal(
-            region.font_size,
-            region.get_translation_for_rendering(),
-            round(norm_h[0]),
-            round(norm_v[0]),
-            region.alignment,
-            region.direction == 'hl',
-            fg,
-            bg,
-            region.target_lang,
-            hyphenate,
-            line_spacing,
+            region.font_size, region.get_translation_for_rendering(),
+            round(norm_h[0]), round(norm_v[0]), region.alignment,
+            region.direction == 'hl', fg, bg, region.target_lang,
+            hyphenate, line_spacing,
         )
     else:
         temp_box = text_render.put_text_vertical(
-            region.font_size,
-            region.get_translation_for_rendering(),
-            round(norm_v[0]),
-            region.alignment,
-            fg,
-            bg,
-            line_spacing,
+            region.font_size, region.get_translation_for_rendering(),
+            round(norm_v[0]), region.alignment, fg, bg, line_spacing,
         )
+        
+    if temp_box is None or temp_box.size == 0:
+        return img
+
     h, w, _ = temp_box.shape
     r_temp = w / h
-
-    # Extend temporary box so that it has same ratio as original
     box = None  
     
-    if region.horizontal:  
+    if render_horizontally:  
         if r_temp > r_orig:   
             h_ext = int((w / r_orig - h) // 2) if r_orig > 0 else 0  
-            
             if h_ext >= 0:  
                 box = np.zeros((h + h_ext * 2, w, 4), dtype=np.uint8)  
                 box[h_ext:h_ext+h, 0:w] = temp_box  
@@ -363,7 +362,6 @@ def render(
                 box = temp_box.copy()  
         else:   
             w_ext = int((h * r_orig - w) // 2)  
-            
             if w_ext >= 0:  
                 box = np.zeros((h, w + w_ext * 2, 4), dtype=np.uint8)  
                 box[0:h, 0:w] = temp_box  
@@ -372,29 +370,64 @@ def render(
     else:  
         if r_temp > r_orig:   
             h_ext = int(w / (2 * r_orig) - h / 2) if r_orig > 0 else 0   
-            
-            if h_ext >= 0:   
+            if h_ext >= 0:  
                 box = np.zeros((h + h_ext * 2, w, 4), dtype=np.uint8)  
                 box[0:h, 0:w] = temp_box  
-            else:   
+            else:  
                 box = temp_box.copy()   
         else:   
             w_ext = int((h * r_orig - w) / 2)  
-            
             if w_ext >= 0:  
                 box = np.zeros((h, w + w_ext * 2, 4), dtype=np.uint8)  
                 box[0:h, w_ext:w_ext+w] = temp_box  
-            else:   
+            else:  
                 box = temp_box.copy()   
 
+    # Setup source rendering points
     src_points = np.array([[0, 0], [box.shape[1], 0], [box.shape[1], box.shape[0]], [0, box.shape[0]]]).astype(np.float32)
 
+    # --- ENHANCED FORCE CLAMPING LOGIC ---
+    # 1. Get the boundary of where the text wants to go
+    img_h, img_w = img.shape[:2]
+    x, y, w_b, h_b = cv2.boundingRect(dst_points.astype(np.int32))
+    # 2. Check if text box falls outside or threatens to exceed canvas limits
+    if x < 0 or y < 0 or (x + w_b) > img_w or (y + h_b) > img_h:
+        # Calculate corrective directional offsets
+        offset_x = 0
+        offset_y = 0
+        if x < 0: offset_x = -x
+        if y < 0: offset_y = -y
+        if (x + w_b) > img_w: offset_x = img_w - (x + w_b)
+        if (y + h_b) > img_h: offset_y = img_h - (y + h_b)
+        
+        # Modify the coordinates safely using the explicit (1, 4, 2) shape indices
+        dst_points[0, :, 0] += offset_x
+        dst_points[0, :, 1] += offset_y
+        
+        # Absolute safety fallback clamp to prevent decimal overflow anomalies
+        dst_points[0, :, 0] = np.clip(dst_points[0, :, 0], 0, img_w)
+        dst_points[0, :, 1] = np.clip(dst_points[0, :, 1], 0, img_h)
+        
+    # Run standard warp perspective
     M, _ = cv2.findHomography(src_points, dst_points, cv2.RANSAC, 5.0)
-    rgba_region = cv2.warpPerspective(box, M, (img.shape[1], img.shape[0]), flags=cv2.INTER_LINEAR, borderMode=cv2.BORDER_CONSTANT, borderValue=0)
-    x, y, w, h = cv2.boundingRect(dst_points.astype(np.int32))
-    canvas_region = rgba_region[y:y+h, x:x+w, :3]
-    mask_region = rgba_region[y:y+h, x:x+w, 3:4].astype(np.float32) / 255.0
-    img[y:y+h, x:x+w] = np.clip((img[y:y+h, x:x+w].astype(np.float32) * (1 - mask_region) + canvas_region.astype(np.float32) * mask_region), 0, 255).astype(np.uint8)
+    rgba_region = cv2.warpPerspective(box, M, (img_w, img_h), flags=cv2.INTER_LINEAR, borderMode=cv2.BORDER_CONSTANT, borderValue=0)
+    
+    # Recalculate safe destination dimensions within exact bounds
+    x, y, w_b, h_b = cv2.boundingRect(dst_points.astype(np.int32))
+    x1, y1 = max(0, x), max(0, y)
+    x2, y2 = min(img_w, x + w_b), min(img_h, y + h_b)
+
+    if (x2 - x1) <= 0 or (y2 - y1) <= 0:
+        return img
+    
+    canvas_region = rgba_region[y1:y2, x1:x2, :3]
+    mask_region = rgba_region[y1:y2, x1:x2, 3:4].astype(np.float32) / 255.0
+    
+    img[y1:y2, x1:x2] = np.clip(
+        (img[y1:y2, x1:x2].astype(np.float32) * (1 - mask_region) + canvas_region.astype(np.float32) * mask_region), 
+        0, 255
+    ).astype(np.uint8)
+    
     return img
 
 async def dispatch_eng_render(img_canvas: np.ndarray, original_img: np.ndarray, text_regions: List[TextBlock], font_path: str = '', line_spacing: int = 0, disable_font_border: bool = False) -> np.ndarray:
